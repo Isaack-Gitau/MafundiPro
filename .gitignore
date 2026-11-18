@@ -1,0 +1,64 @@
+﻿# Environment variables and secrets
+.env
+.env.*
+!.env.example
+*.secret
+secrets/
+credentials/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+ENV/
+env/
+
+# Node
+node_modules/
+dist/
+build/
+.expo/
+.expo-shared/
+coverage/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local databases and storage
+postgres_data/
+database_data/
+uploads/
+media/
+*.sqlite
+*.sqlite3
+*.db
+
+# Certificates and private keys
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
+
+# Python packaging and tooling
+*.egg-info/
+.ruff_cache/
+
+# Generated migration previews
+backend/identity_migration_preview.sql
