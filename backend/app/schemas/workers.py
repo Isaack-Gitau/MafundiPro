@@ -50,6 +50,72 @@ class WorkerProfileUpdate(BaseModel):
         return self
 
 
+class WorkerProfessionSelectionInput(BaseModel):
+    """Validate a worker's complete main-profession selection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    category_ids: list[UUID] = Field(max_length=3)
+
+    @field_validator("category_ids")
+    @classmethod
+    def validate_unique_categories(cls, value: list[UUID]) -> list[UUID]:
+        """Reject duplicate profession selections."""
+        if len(value) != len(set(value)):
+            raise ValueError("A profession cannot be selected more than once.")
+        return value
+
+
+class WorkerSkillSelectionInput(BaseModel):
+    """Identify one skill through its associated taxonomy category."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    category_id: UUID
+    skill_id: UUID
+
+
+class WorkerSkillSelectionsInput(BaseModel):
+    """Validate the complete skill selection for one profession."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    skills: list[WorkerSkillSelectionInput]
+
+    @model_validator(mode="after")
+    def validate_unique_skill_selections(self) -> "WorkerSkillSelectionsInput":
+        """Reject selecting the same skill more than once per profession."""
+        skill_ids = [selection.skill_id for selection in self.skills]
+
+        if len(skill_ids) != len(set(skill_ids)):
+            raise ValueError("A skill cannot be selected more than once under the same profession.")
+
+        return self
+
+
+class WorkerSkillSelectionRead(BaseModel):
+    """Expose one selected skill and its taxonomy category."""
+
+    category_id: UUID
+    category_name: str
+    skill_id: UUID
+    skill_name: str
+
+
+class WorkerProfessionSelectionRead(BaseModel):
+    """Expose a selected profession and its associated skills."""
+
+    category_id: UUID
+    category_name: str
+    skills: list[WorkerSkillSelectionRead]
+
+
+class WorkerProfessionSelectionsRead(BaseModel):
+    """Expose all professions selected by a worker."""
+
+    professions: list[WorkerProfessionSelectionRead]
+
+
 class WorkerProfileRead(BaseModel):
     """Expose safe worker profile information."""
 
