@@ -1,11 +1,15 @@
 from collections.abc import Generator
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.database.session import engine
+from app.models.identity import User
 from app.models.taxonomy import Category
+from app.models.worker import WorkerProfession, WorkerProfile, WorkerSkill
 from app.services.taxonomy import (
     TaxonomyConflictError,
     TaxonomyNotFoundError,
@@ -39,6 +43,62 @@ def db_session() -> Generator[Session]:
         finally:
             session.close()
             transaction.rollback()
+
+
+def create_worker_profession(
+    db: Session,
+    main_category: Category,
+) -> WorkerProfile:
+    """Create a test worker with one selected main profession."""
+    username = f"taxonomy_{uuid4().hex[:12]}"
+
+    user = User(
+        full_name="Taxonomy Test Worker",
+        username=username,
+        username_key=username.casefold(),
+        phone_number=f"+2547{uuid4().int % 100_000_000:08d}",
+        password_hash="test-password-hash",
+        account_status="active",
+        phone_verified_at=datetime.now(UTC),
+    )
+    db.add(user)
+    db.flush()
+
+    profile = WorkerProfile(
+        user_id=user.id,
+        display_name=user.full_name,
+    )
+    db.add(profile)
+    db.flush()
+
+    profession = WorkerProfession(
+        worker_profile_id=profile.id,
+        category_id=main_category.id,
+    )
+    db.add(profession)
+    db.flush()
+
+    return profile
+
+
+def add_worker_skill(
+    db: Session,
+    profile: WorkerProfile,
+    main_category: Category,
+    skill_category: Category,
+    skill_id: UUID,
+) -> WorkerSkill:
+    """Add a selected skill beneath one of the worker's main professions."""
+    worker_skill = WorkerSkill(
+        worker_profile_id=profile.id,
+        main_category_id=main_category.id,
+        category_id=skill_category.id,
+        skill_id=skill_id,
+    )
+    db.add(worker_skill)
+    db.flush()
+
+    return worker_skill
 
 
 def test_normalize_name() -> None:
@@ -384,3 +444,84 @@ def test_category_can_be_renamed_without_changing_its_identity(
     assert updated.id == category.id
     assert updated.name == "Electrical Installation"
     assert updated.name_key == "electrical installation"
+
+
+def test_selected_main_profession_cannot_be_moved(
+    db_session: Session,
+) -> None:
+    construction = create_category(db_session, "Construction")
+    maintenance = create_category(db_session, "Maintenance")
+    create_worker_profession(db_session, construction)
+
+    with pytest.raises(TaxonomyConflictError, match="main profession"):
+        move_category(db_session, construction.id, maintenance.id)
+
+
+def test_category_subtree_with_worker_selected_skill_cannot_be_moved(
+    db_session: Session,
+) -> None:
+    construction = create_category(db_session, "Construction")
+    maintenance = create_category(db_session, "Maintenance")
+    roofing = create_category(db_session, "Roofing", parent_id=construction.id)
+    metal_roofing = create_category(db_session, "Metal Roofing", parent_id=roofing.id)
+    skill = create_skill(db_session, "Standing Seam Installation")
+    associate_skill(db_session, metal_roofing.id, skill.id)
+
+    profile = create_worker_profession(db_session, construction)
+    add_worker_skill(db_session, profile, construction, metal_roofing, skill.id)
+
+    with pytest.raises(TaxonomyConflictError, match="worker-selected skills"):
+        move_category(db_session, roofing.id, maintenance.id)
+
+
+def test_category_selected_as_main_profession_cannot_be_deleted(
+    db_session: Session,
+) -> None:
+    construction = create_category(db_session, "Construction")
+    create_worker_profession(db_session, construction)
+
+    with pytest.raises(TaxonomyConflictError, match="main profession"):
+        delete_category(db_session, construction.id)
+
+
+def test_category_with_worker_selected_skill_cannot_be_deleted(
+    db_session: Session,
+) -> None:
+    construction = create_category(db_session, "Construction")
+    masonry = create_category(db_session, "Masonry", parent_id=construction.id)
+    skill = create_skill(db_session, "Block Laying")
+    associate_skill(db_session, masonry.id, skill.id)
+
+    profile = create_worker_profession(db_session, construction)
+    add_worker_skill(db_session, profile, construction, masonry, skill.id)
+
+    with pytest.raises(TaxonomyConflictError, match="worker-selected skills"):
+        delete_category(db_session, masonry.id)
+
+
+def test_worker_selected_category_skill_association_cannot_be_removed(
+    db_session: Session,
+) -> None:
+    construction = create_category(db_session, "Construction")
+    skill = create_skill(db_session, "Masonry")
+    associate_skill(db_session, construction.id, skill.id)
+
+    profile = create_worker_profession(db_session, construction)
+    add_worker_skill(db_session, profile, construction, construction, skill.id)
+
+    with pytest.raises(TaxonomyConflictError, match="selected by workers"):
+        disassociate_skill(db_session, construction.id, skill.id)
+
+
+def test_worker_selected_skill_cannot_be_deleted(
+    db_session: Session,
+) -> None:
+    construction = create_category(db_session, "Construction")
+    skill = create_skill(db_session, "Masonry")
+    associate_skill(db_session, construction.id, skill.id)
+
+    profile = create_worker_profession(db_session, construction)
+    add_worker_skill(db_session, profile, construction, construction, skill.id)
+
+    with pytest.raises(TaxonomyConflictError, match="selected by workers"):
+        delete_skill(db_session, skill.id)

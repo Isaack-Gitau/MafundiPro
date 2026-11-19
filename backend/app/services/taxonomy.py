@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.taxonomy import Category, Skill
+from app.models.worker import WorkerProfession, WorkerSkill
 
 
 class TaxonomyError(Exception):
@@ -253,6 +254,65 @@ def update_category(
     return category
 
 
+def _category_subtree_ids(db: Session, category_id: UUID):
+    """Return a recursive SQL query containing a category and all descendants."""
+    subtree = (
+        select(Category.id.label("id"))
+        .where(Category.id == category_id)
+        .cte(name="category_subtree", recursive=True)
+    )
+
+    return subtree.union(select(Category.id.label("id")).where(Category.parent_id == subtree.c.id))
+
+
+def _ensure_category_subtree_has_no_worker_selections(
+    db: Session,
+    category_id: UUID,
+) -> None:
+    """Prevent moving a category subtree containing selected worker professions or skills."""
+    subtree_ids = _category_subtree_ids(db, category_id)
+
+    selected_profession = db.scalar(
+        select(WorkerProfession.id).where(WorkerProfession.category_id == category_id).limit(1)
+    )
+
+    if selected_profession is not None:
+        raise TaxonomyConflictError(
+            "A category selected as a worker's main profession cannot be moved."
+        )
+
+    selected_skill = db.scalar(
+        select(WorkerSkill.id).where(WorkerSkill.category_id.in_(select(subtree_ids.c.id))).limit(1)
+    )
+
+    if selected_skill is not None:
+        raise TaxonomyConflictError("A category containing worker-selected skills cannot be moved.")
+
+
+def _ensure_category_has_no_worker_references(
+    db: Session,
+    category_id: UUID,
+) -> None:
+    """Prevent deleting a category referenced by worker selections."""
+    profession_exists = db.scalar(
+        select(WorkerProfession.id).where(WorkerProfession.category_id == category_id).limit(1)
+    )
+
+    if profession_exists is not None:
+        raise TaxonomyConflictError(
+            "A category selected as a worker's main profession cannot be deleted."
+        )
+
+    skill_exists = db.scalar(
+        select(WorkerSkill.id).where(WorkerSkill.category_id == category_id).limit(1)
+    )
+
+    if skill_exists is not None:
+        raise TaxonomyConflictError(
+            "A category containing worker-selected skills cannot be deleted."
+        )
+
+
 def move_category(
     db: Session,
     category_id: UUID,
@@ -263,6 +323,8 @@ def move_category(
 
     if category.parent_id == new_parent_id:
         return category
+
+    _ensure_category_subtree_has_no_worker_selections(db, category.id)
 
     validate_parent(db, new_parent_id, category_id=category.id)
     ensure_category_name_available(
@@ -299,8 +361,10 @@ def set_category_active(
 
 
 def delete_category(db: Session, category_id: UUID) -> None:
-    """Delete a category only when it has no children or skill associations."""
+    """Delete a category only when it has no children or worker references."""
     category = get_category_or_raise(db, category_id)
+
+    _ensure_category_has_no_worker_references(db, category.id)
 
     child_exists = db.scalar(select(Category.id).where(Category.parent_id == category.id).limit(1))
 
@@ -415,6 +479,20 @@ def disassociate_skill(
     skill = get_skill_or_raise(db, skill_id)
 
     if skill in category.skills:
+        selected_skill = db.scalar(
+            select(WorkerSkill.id)
+            .where(
+                WorkerSkill.category_id == category.id,
+                WorkerSkill.skill_id == skill.id,
+            )
+            .limit(1)
+        )
+
+        if selected_skill is not None:
+            raise TaxonomyConflictError(
+                "A category-skill association selected by workers cannot be removed."
+            )
+
         category.skills.remove(skill)
         db.flush()
 
@@ -422,8 +500,15 @@ def disassociate_skill(
 
 
 def delete_skill(db: Session, skill_id: UUID) -> None:
-    """Delete a skill only when it has no category associations."""
+    """Delete a skill only when it has no worker or category references."""
     skill = get_skill_or_raise(db, skill_id)
+
+    selected_skill = db.scalar(
+        select(WorkerSkill.id).where(WorkerSkill.skill_id == skill.id).limit(1)
+    )
+
+    if selected_skill is not None:
+        raise TaxonomyConflictError("A skill selected by workers cannot be deleted.")
 
     if skill.categories:
         raise TaxonomyConflictError(
