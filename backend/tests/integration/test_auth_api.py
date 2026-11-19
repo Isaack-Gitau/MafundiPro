@@ -1,4 +1,4 @@
-﻿from collections.abc import AsyncIterator, Generator
+from collections.abc import AsyncIterator, Generator
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -152,9 +152,7 @@ async def test_login_authenticates_active_verified_user(
     session_token = client.cookies.get(settings.session_cookie_name)
     assert session_token
 
-    stored_session = db_session.scalar(
-        select(UserSession).where(UserSession.user_id == user.id)
-    )
+    stored_session = db_session.scalar(select(UserSession).where(UserSession.user_id == user.id))
 
     assert stored_session is not None
     assert stored_session.token_hash == hash_session_token(session_token)
@@ -324,9 +322,7 @@ async def test_logout_revokes_session_and_clears_cookies(
     assert logout_response.status_code == 200
     assert logout_response.json() == {"logged_out": True}
 
-    stored_session = db_session.scalar(
-        select(UserSession).where(UserSession.user_id == user.id)
-    )
+    stored_session = db_session.scalar(select(UserSession).where(UserSession.user_id == user.id))
 
     assert stored_session is not None
     assert stored_session.revoked_at is not None
@@ -334,13 +330,11 @@ async def test_logout_revokes_session_and_clears_cookies(
     set_cookie_headers = logout_response.headers.get_list("set-cookie")
 
     assert any(
-        header.startswith(f"{settings.session_cookie_name}=")
-        and "max-age=0" in header.lower()
+        header.startswith(f"{settings.session_cookie_name}=") and "max-age=0" in header.lower()
         for header in set_cookie_headers
     )
     assert any(
-        header.startswith(f"{settings.csrf_cookie_name}=")
-        and "max-age=0" in header.lower()
+        header.startswith(f"{settings.csrf_cookie_name}=") and "max-age=0" in header.lower()
         for header in set_cookie_headers
     )
 
@@ -364,9 +358,7 @@ async def test_logout_rejects_invalid_csrf_token(
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "INVALID_CSRF_TOKEN"
 
-    stored_session = db_session.scalar(
-        select(UserSession).where(UserSession.user_id == user.id)
-    )
+    stored_session = db_session.scalar(select(UserSession).where(UserSession.user_id == user.id))
 
     assert stored_session is not None
     assert stored_session.revoked_at is None

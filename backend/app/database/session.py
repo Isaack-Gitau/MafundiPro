@@ -18,7 +18,16 @@ SessionLocal = sessionmaker(
 
 
 def get_db() -> Generator[Session]:
-    """Provide a database session and always close it after use."""
+    """Provide a database session for application operations."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def get_auth_db() -> Generator[Session]:
+    """Provide an independent database session for authentication operations."""
     db = SessionLocal()
     try:
         yield db
