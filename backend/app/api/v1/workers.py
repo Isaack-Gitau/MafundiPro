@@ -4,12 +4,13 @@ from app.api.dependencies.authentication import CurrentUser
 from app.api.dependencies.database import DatabaseSession
 from app.core.errors import AppError
 from app.models.worker import WorkerProfile
-from app.schemas.workers import WorkerProfileRead
+from app.schemas.workers import WorkerProfileRead, WorkerProfileUpdate
 from app.services.workers import (
     WorkerProfileConflictError,
     WorkerProfileNotFoundError,
     create_worker_profile,
     get_worker_profile,
+    update_worker_profile,
 )
 
 router = APIRouter()
@@ -61,6 +62,34 @@ def get_me_worker_profile(
     try:
         profile: WorkerProfile = get_worker_profile(db, current_user.id)
     except WorkerProfileNotFoundError as exc:
+        raise AppError(
+            status_code=404,
+            code="WORKER_PROFILE_NOT_FOUND",
+            message=str(exc),
+        ) from exc
+
+    return WorkerProfileRead.model_validate(profile)
+
+
+@router.patch(
+    "/me",
+    response_model=WorkerProfileRead,
+    summary="Update the authenticated user's worker profile",
+)
+def update_me_worker_profile(
+    payload: WorkerProfileUpdate,
+    current_user: CurrentUser,
+    db: DatabaseSession,
+) -> WorkerProfileRead:
+    """Update the supplied fields on the authenticated worker profile."""
+    updates = payload.model_dump(exclude_unset=True)
+
+    try:
+        profile = update_worker_profile(db, current_user.id, updates)
+        db.commit()
+        db.refresh(profile)
+    except WorkerProfileNotFoundError as exc:
+        db.rollback()
         raise AppError(
             status_code=404,
             code="WORKER_PROFILE_NOT_FOUND",

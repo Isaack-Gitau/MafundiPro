@@ -285,3 +285,194 @@ async def test_worker_profile_endpoints_reject_untrusted_origin(
 
     assert post_response.status_code == 403
     assert post_response.json()["error"]["code"] == "UNTRUSTED_ORIGIN"
+
+
+async def test_update_worker_profile_requires_authentication(
+    client: AsyncClient,
+) -> None:
+    response = await client.patch(
+        "/api/v1/workers/me",
+        json={"display_name": "Updated Worker"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "AUTHENTICATION_REQUIRED"
+
+
+async def test_update_worker_profile_requires_csrf_token(
+    client: AsyncClient,
+    db_session: Session,
+    valid_password_hash: str,
+) -> None:
+    user = create_user(db_session, valid_password_hash)
+    await login_user(client, user.username)
+
+    response = await client.patch(
+        "/api/v1/workers/me",
+        json={"display_name": "Updated Worker"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "INVALID_CSRF_TOKEN"
+
+
+async def test_update_worker_profile_returns_not_found_when_missing(
+    client: AsyncClient,
+    db_session: Session,
+    valid_password_hash: str,
+) -> None:
+    user = create_user(db_session, valid_password_hash)
+    csrf_token = await login_user(client, user.username)
+
+    response = await client.patch(
+        "/api/v1/workers/me",
+        headers={"X-CSRF-Token": csrf_token},
+        json={"display_name": "Updated Worker"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "WORKER_PROFILE_NOT_FOUND"
+
+
+async def test_update_worker_profile_changes_supplied_fields_only(
+    client: AsyncClient,
+    db_session: Session,
+    valid_password_hash: str,
+) -> None:
+    user = create_user(db_session, valid_password_hash)
+    csrf_token = await login_user(client, user.username)
+
+    created = await client.post(
+        "/api/v1/workers/me",
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert created.status_code == 201
+
+    response = await client.patch(
+        "/api/v1/workers/me",
+        headers={"X-CSRF-Token": csrf_token},
+        json={
+            "display_name": "  Updated Worker  ",
+            "bio": "  Experienced professional  ",
+            "experience_years": 5,
+            "availability": "available",
+        },
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["display_name"] == "Updated Worker"
+    assert data["bio"] == "Experienced professional"
+    assert data["experience_years"] == 5
+    assert data["availability"] == "available"
+    assert data["service_description"] is None
+    assert data["user_id"] == str(user.id)
+
+
+async def test_update_worker_profile_can_clear_optional_fields(
+    client: AsyncClient,
+    db_session: Session,
+    valid_password_hash: str,
+) -> None:
+    user = create_user(db_session, valid_password_hash)
+    csrf_token = await login_user(client, user.username)
+
+    created = await client.post(
+        "/api/v1/workers/me",
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert created.status_code == 201
+
+    updated = await client.patch(
+        "/api/v1/workers/me",
+        headers={"X-CSRF-Token": csrf_token},
+        json={
+            "bio": "A worker biography",
+            "service_description": "Professional services",
+            "experience_years": 3,
+        },
+    )
+    assert updated.status_code == 200
+
+    response = await client.patch(
+        "/api/v1/workers/me",
+        headers={"X-CSRF-Token": csrf_token},
+        json={
+            "bio": None,
+            "service_description": None,
+            "experience_years": None,
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["bio"] is None
+    assert data["service_description"] is None
+    assert data["experience_years"] is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"display_name": None},
+        {"display_name": "   "},
+        {"display_name": "A" * 121},
+        {"availability": None},
+        {"availability": "sleeping"},
+        {"experience_years": -1},
+        {"experience_years": 2.5},
+        {"experience_years": "5"},
+        {"unknown_field": "not allowed"},
+    ],
+)
+async def test_update_worker_profile_rejects_invalid_payloads(
+    client: AsyncClient,
+    db_session: Session,
+    valid_password_hash: str,
+    payload: dict[str, object],
+) -> None:
+    user = create_user(db_session, valid_password_hash)
+    csrf_token = await login_user(client, user.username)
+
+    created = await client.post(
+        "/api/v1/workers/me",
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert created.status_code == 201
+
+    response = await client.patch(
+        "/api/v1/workers/me",
+        headers={"X-CSRF-Token": csrf_token},
+        json=payload,
+    )
+
+    assert response.status_code == 422
+
+
+async def test_update_worker_profile_rejects_untrusted_origin(
+    client: AsyncClient,
+    db_session: Session,
+    valid_password_hash: str,
+) -> None:
+    user = create_user(db_session, valid_password_hash)
+    csrf_token = await login_user(client, user.username)
+
+    created = await client.post(
+        "/api/v1/workers/me",
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert created.status_code == 201
+
+    response = await client.patch(
+        "/api/v1/workers/me",
+        headers={
+            "Origin": "https://untrusted.example",
+            "X-CSRF-Token": csrf_token,
+        },
+        json={"display_name": "Updated Worker"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "UNTRUSTED_ORIGIN"

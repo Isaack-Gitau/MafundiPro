@@ -67,3 +67,19 @@ def get_worker_profile(db: Session, user_id: UUID) -> WorkerProfile:
         raise WorkerProfileNotFoundError("Worker profile was not found.")
 
     return profile
+
+
+def update_worker_profile(
+    db: Session,
+    user_id: UUID,
+    updates: dict[str, object],
+) -> WorkerProfile:
+    """Update only the supplied fields on the authenticated user's profile."""
+    profile = get_worker_profile(db, user_id)
+
+    for field, value in updates.items():
+        setattr(profile, field, value)
+
+    db.flush()
+
+    return profile
