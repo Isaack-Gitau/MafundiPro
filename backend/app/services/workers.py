@@ -13,6 +13,7 @@ from app.services.taxonomy import (
     get_skill_or_raise,
     validate_category_active_chain,
 )
+from app.services.taxonomy_lock import lock_taxonomy_mutations
 
 
 class WorkerProfileError(Exception):
@@ -199,6 +200,7 @@ def replace_worker_professions(
     category_ids: list[UUID],
 ) -> dict[str, list]:
     """Atomically replace main professions while retaining skills for retained professions."""
+    lock_taxonomy_mutations(db)
     if len(category_ids) > 3:
         raise TaxonomyValidationError("A worker can select no more than three main professions.")
 
@@ -247,6 +249,7 @@ def replace_worker_skills(
     selections: list[dict[str, UUID]],
 ) -> dict[str, list]:
     """Atomically replace selected skills for one existing main profession."""
+    lock_taxonomy_mutations(db)
     profile = _get_locked_worker_profile(db, user_id)
 
     profession = db.scalar(

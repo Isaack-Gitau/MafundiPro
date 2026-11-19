@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models.taxonomy import Category, Skill
 from app.models.worker import WorkerProfession, WorkerSkill
+from app.services.taxonomy_lock import lock_taxonomy_mutations
 
 
 class TaxonomyError(Exception):
@@ -199,6 +200,7 @@ def create_category(
     display_order: int = 0,
 ) -> Category:
     """Create a root category or a nested category."""
+    lock_taxonomy_mutations(db)
     display_name, name_key = normalize_name(name)
     normalized_description = normalize_description(description)
     validate_display_order(display_order)
@@ -230,6 +232,7 @@ def update_category(
     display_order: int | None = None,
 ) -> Category:
     """Update a category while distinguishing omitted and cleared descriptions."""
+    lock_taxonomy_mutations(db)
     category = get_category_or_raise(db, category_id)
 
     if name is not None:
@@ -319,6 +322,7 @@ def move_category(
     new_parent_id: UUID | None,
 ) -> Category:
     """Move a category while preserving hierarchy integrity."""
+    lock_taxonomy_mutations(db)
     category = get_category_or_raise(db, category_id)
 
     if category.parent_id == new_parent_id:
@@ -346,6 +350,7 @@ def set_category_active(
     is_active: bool,
 ) -> Category:
     """Activate or deactivate a category without deleting its history."""
+    lock_taxonomy_mutations(db)
     if not isinstance(is_active, bool):
         raise TaxonomyValidationError("Category activation state must be a boolean.")
 
@@ -362,6 +367,7 @@ def set_category_active(
 
 def delete_category(db: Session, category_id: UUID) -> None:
     """Delete a category only when it has no children or worker references."""
+    lock_taxonomy_mutations(db)
     category = get_category_or_raise(db, category_id)
 
     _ensure_category_has_no_worker_references(db, category.id)
@@ -388,6 +394,7 @@ def create_skill(
     description: str | None = None,
 ) -> Skill:
     """Create a reusable skill."""
+    lock_taxonomy_mutations(db)
     display_name, name_key = normalize_name(name)
     normalized_description = normalize_description(description)
     ensure_skill_name_available(db, name_key)
@@ -413,6 +420,7 @@ def update_skill(
     description: str | None | _UnsetType = _UNSET,
 ) -> Skill:
     """Update a reusable skill while supporting explicit description clearing."""
+    lock_taxonomy_mutations(db)
     skill = get_skill_or_raise(db, skill_id)
 
     if name is not None:
@@ -438,6 +446,7 @@ def set_skill_active(
     is_active: bool,
 ) -> Skill:
     """Activate or deactivate a skill without deleting its history."""
+    lock_taxonomy_mutations(db)
     if not isinstance(is_active, bool):
         raise TaxonomyValidationError("Skill activation state must be a boolean.")
 
@@ -454,6 +463,7 @@ def associate_skill(
     skill_id: UUID,
 ) -> Category:
     """Associate an active reusable skill with an active category."""
+    lock_taxonomy_mutations(db)
     category = validate_category_active_chain(db, category_id)
     skill = get_skill_or_raise(db, skill_id)
 
@@ -475,6 +485,7 @@ def disassociate_skill(
     skill_id: UUID,
 ) -> Category:
     """Remove a skill association without deleting the shared skill."""
+    lock_taxonomy_mutations(db)
     category = get_category_or_raise(db, category_id)
     skill = get_skill_or_raise(db, skill_id)
 
@@ -501,6 +512,7 @@ def disassociate_skill(
 
 def delete_skill(db: Session, skill_id: UUID) -> None:
     """Delete a skill only when it has no worker or category references."""
+    lock_taxonomy_mutations(db)
     skill = get_skill_or_raise(db, skill_id)
 
     selected_skill = db.scalar(
