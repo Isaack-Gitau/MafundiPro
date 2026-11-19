@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.api.v1.admin_taxonomy import router as admin_taxonomy_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.public_taxonomy import router as public_taxonomy_router
 from app.api.v1.users import router as users_router
@@ -28,6 +29,12 @@ router.include_router(
     public_taxonomy_router,
     prefix="/public",
     tags=["Public Taxonomy"],
+)
+
+router.include_router(
+    admin_taxonomy_router,
+    prefix="/admin/taxonomy",
+    tags=["Admin Taxonomy"],
 )
 
 router.include_router(
