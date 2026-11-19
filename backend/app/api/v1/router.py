@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1.admin_taxonomy import router as admin_taxonomy_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.employers import router as employers_router
 from app.api.v1.public_taxonomy import router as public_taxonomy_router
 from app.api.v1.users import router as users_router
 from app.api.v1.workers import router as workers_router
@@ -47,4 +48,10 @@ router.include_router(
     workers_router,
     prefix="/workers",
     tags=["Workers"],
+)
+
+router.include_router(
+    employers_router,
+    prefix="/employers",
+    tags=["Employers"],
 )
