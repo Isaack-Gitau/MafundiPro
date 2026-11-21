@@ -33,4 +33,29 @@ def require_admin(
     return current_user
 
 
+def require_moderator_or_admin(
+    current_user: CurrentUser,
+    db: DatabaseSession,
+) -> User:
+    """Require moderator or administrator privileges."""
+    has_permission = db.scalar(
+        select(UserRole.id)
+        .where(
+            UserRole.user_id == current_user.id,
+            UserRole.role.in_(("moderator", "admin")),
+        )
+        .limit(1)
+    )
+
+    if has_permission is None:
+        raise AppError(
+            status_code=403,
+            code="MODERATOR_OR_ADMIN_REQUIRED",
+            message="Moderator or administrator privileges are required.",
+        )
+
+    return current_user
+
+
 AdminUser = Annotated[User, Depends(require_admin)]
+ModeratorOrAdmin = Annotated[User, Depends(require_moderator_or_admin)]
