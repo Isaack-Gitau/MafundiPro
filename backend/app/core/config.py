@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     login_rate_limit_ip_attempts: int = Field(default=30, ge=1)
     login_rate_limit_window_minutes: int = Field(default=15, ge=1)
 
+    payment_provider: str = "fake"
+
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
         env_file_encoding="utf-8",

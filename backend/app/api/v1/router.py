@@ -9,6 +9,7 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.employer_job_advertisements import (
     router as employer_job_advertisements_router,
 )
+from app.api.v1.employer_payments import router as employer_payments_router
 from app.api.v1.employers import router as employers_router
 from app.api.v1.public_job_advertisements import (
     router as public_job_advertisements_router,
@@ -95,4 +96,10 @@ router.include_router(
     public_job_advertisements_router,
     prefix="/public",
     tags=["Public Job Advertisements"],
+)
+
+router.include_router(
+    employer_payments_router,
+    prefix="/employers/payments",
+    tags=["Employer Payments"],
 )

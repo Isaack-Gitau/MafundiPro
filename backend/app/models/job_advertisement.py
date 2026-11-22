@@ -481,6 +481,25 @@ class Payment(Base):
             postgresql_where=text("provider_reference IS NOT NULL"),
         ),
         Index("ix_payments_employer_created", "employer_profile_id", "created_at"),
+        CheckConstraint(
+            "credits_to_grant IS NULL OR credits_to_grant > 0",
+            name="ck_payments_credits_to_grant",
+        ),
+        Index(
+            "uq_payments_one_pending_per_purpose",
+            "employer_profile_id",
+            "purpose",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+        ),
+        Index(
+            "uq_payments_one_initial_package",
+            "employer_profile_id",
+            unique=True,
+            postgresql_where=text(
+                "purpose = 'initial_employer_package' AND status IN ('pending', 'succeeded')"
+            ),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -529,6 +548,8 @@ class Payment(Base):
         default=dict,
         server_default=text("'{}'::jsonb"),
     )
+    payer_phone: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    credits_to_grant: Mapped[int | None] = mapped_column(Integer, nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
