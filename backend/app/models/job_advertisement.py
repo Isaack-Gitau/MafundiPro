@@ -552,7 +552,10 @@ class EmployerPostingCreditEntry(Base):
     __tablename__ = "employer_posting_credit_entries"
     __table_args__ = (
         CheckConstraint(
-            "entry_type IN ('initial_grant', 'additional_purchase', 'consumption')",
+            (
+                "entry_type IN ('initial_grant', 'additional_purchase', "
+                "'consumption', 'refund_reversal')"
+            ),
             name="ck_employer_posting_credit_entries_type",
         ),
         CheckConstraint(
@@ -562,12 +565,24 @@ class EmployerPostingCreditEntry(Base):
                 AND credit_delta > 0
                 AND payment_id IS NOT NULL
                 AND advertisement_id IS NULL
+                AND source_payment_id IS NULL
+                AND refund_id IS NULL
             )
             OR (
                 entry_type = 'consumption'
                 AND credit_delta = -1
                 AND payment_id IS NULL
                 AND advertisement_id IS NOT NULL
+                AND source_payment_id IS NOT NULL
+                AND refund_id IS NULL
+            )
+            OR (
+                entry_type = 'refund_reversal'
+                AND credit_delta < 0
+                AND payment_id IS NULL
+                AND advertisement_id IS NULL
+                AND source_payment_id IS NOT NULL
+                AND refund_id IS NOT NULL
             )
             """,
             name="ck_employer_posting_credit_entries_integrity",
@@ -588,6 +603,16 @@ class EmployerPostingCreditEntry(Base):
             "ix_employer_posting_credit_employer_created",
             "employer_profile_id",
             "created_at",
+        ),
+        Index(
+            "uq_employer_posting_credit_refund",
+            "refund_id",
+            unique=True,
+            postgresql_where=text("refund_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_employer_posting_credit_source_payment",
+            "source_payment_id",
         ),
     )
 
@@ -611,6 +636,16 @@ class EmployerPostingCreditEntry(Base):
     advertisement_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("job_advertisements.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    source_payment_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("payments.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    refund_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("payment_refunds.id", ondelete="RESTRICT"),
         nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -680,6 +715,69 @@ class JobAdvertisementAudit(Base):
         nullable=False,
         default=dict,
         server_default=text("'{}'::jsonb"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class PaymentRefund(Base):
+    """Record an administrator refund of a payment's unconsumed posting credits."""
+
+    __tablename__ = "payment_refunds"
+    __table_args__ = (
+        CheckConstraint(
+            "payout_status IN ('recorded', 'paid_out')",
+            name="ck_payment_refunds_payout_status",
+        ),
+        CheckConstraint("credits_refunded > 0", name="ck_payment_refunds_credits"),
+        CheckConstraint("amount > 0", name="ck_payment_refunds_amount"),
+        CheckConstraint("length(currency_code) = 3", name="ck_payment_refunds_currency"),
+        CheckConstraint("length(trim(reason)) > 0", name="ck_payment_refunds_reason"),
+        CheckConstraint(
+            "payout_status = 'recorded' OR paid_out_at IS NOT NULL",
+            name="ck_payment_refunds_paid_out_at",
+        ),
+        Index("ix_payment_refunds_employer", "employer_profile_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    payment_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("payments.id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
+    )
+    employer_profile_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("employer_profiles.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    credits_refunded: Mapped[int] = mapped_column(Integer, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    refunded_by_user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    payout_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="recorded",
+        server_default=text("'recorded'"),
+    )
+    payout_reference: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    paid_out_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

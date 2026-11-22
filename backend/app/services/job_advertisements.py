@@ -4,7 +4,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, aliased, selectinload
 
 from app.models.employer import EmployerProfile
 from app.models.identity import User
@@ -576,6 +576,26 @@ def _get_settings(db: Session) -> JobAdSettings:
     return settings
 
 
+def _next_credit_source(db: Session, employer_profile_id: UUID) -> UUID | None:
+    """Return the oldest payment that still has unconsumed, unrefunded credits (FIFO)."""
+    child = aliased(EmployerPostingCreditEntry)
+    remaining = EmployerPostingCreditEntry.credit_delta + func.coalesce(
+        func.sum(child.credit_delta), 0
+    )
+    return db.execute(
+        select(EmployerPostingCreditEntry.payment_id)
+        .outerjoin(child, child.source_payment_id == EmployerPostingCreditEntry.payment_id)
+        .where(
+            EmployerPostingCreditEntry.employer_profile_id == employer_profile_id,
+            EmployerPostingCreditEntry.payment_id.is_not(None),
+        )
+        .group_by(EmployerPostingCreditEntry.id)
+        .having(remaining > 0)
+        .order_by(EmployerPostingCreditEntry.created_at, EmployerPostingCreditEntry.id)
+        .limit(1)
+    ).scalar_one_or_none()
+
+
 def get_employer_posting_credit_balance(
     db: Session,
     employer_profile_id: UUID,
@@ -753,8 +773,9 @@ def publish_job_advertisement(
     _validate_publication(advertisement, now, expires_at)
     _build_snapshots(db, advertisement)
 
+    source_payment_id = _next_credit_source(db, employer.id)
     balance = get_employer_posting_credit_balance(db, employer.id)
-    if balance < 1:
+    if balance < 1 or source_payment_id is None:
         raise InsufficientPostingCreditsError(
             "There are no available posting credits. Purchase a posting credit "
             "before publishing another advertisement."
@@ -766,6 +787,7 @@ def publish_job_advertisement(
             entry_type="consumption",
             credit_delta=-1,
             advertisement_id=advertisement.id,
+            source_payment_id=source_payment_id,
         )
     )
 

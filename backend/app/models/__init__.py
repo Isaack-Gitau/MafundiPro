@@ -7,6 +7,7 @@ from app.models.job_advertisement import (
     JobAdvertisementAudit,
     JobAdvertisementContactMethod,
     Payment,
+    PaymentRefund,
 )
 from app.models.location import Location
 from app.models.login_rate_limit import LoginRateLimit
@@ -24,6 +25,7 @@ __all__ = [
     "Location",
     "LoginRateLimit",
     "Payment",
+    "PaymentRefund",
     "PhoneVerification",
     "Skill",
     "User",
