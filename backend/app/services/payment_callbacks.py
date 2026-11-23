@@ -28,7 +28,7 @@ def _redact(payload: Any) -> Any:
     return payload
 
 
-def _record(
+def record_event(
     db: Session,
     provider: PaymentProvider,
     event_type: str,
@@ -48,6 +48,47 @@ def _record(
     db.flush()
 
 
+def grant_verified_payment(
+    db: Session,
+    payment: Payment,
+    receipt: str,
+    verified_at: datetime,
+    *,
+    callback_received_at: datetime | None = None,
+) -> bool:
+    """Mark a verified payment succeeded and grant its credits in one savepoint.
+
+    The caller must already hold the employer and payment locks and have verified the
+    amount and receipt. Returns False, granting nothing, if there is nothing to grant or
+    the write would break a uniqueness rule.
+    """
+    if not payment.credits_to_grant:
+        return False
+
+    entry_type = (
+        "initial_grant" if payment.purpose == "initial_employer_package" else "additional_purchase"
+    )
+    try:
+        with db.begin_nested():
+            payment.status = "succeeded"
+            payment.verified_at = verified_at
+            if callback_received_at is not None:
+                payment.callback_received_at = callback_received_at
+            payment.mpesa_receipt_number = receipt
+            db.add(
+                EmployerPostingCreditEntry(
+                    employer_profile_id=payment.employer_profile_id,
+                    entry_type=entry_type,
+                    credit_delta=payment.credits_to_grant,
+                    payment_id=payment.id,
+                )
+            )
+            db.flush()
+    except IntegrityError:
+        return False
+    return True
+
+
 def process_mpesa_callback(db: Session, provider: PaymentProvider, payload: Any) -> str:
     """Verify a provider callback and grant credits only when every check passes.
 
@@ -57,7 +98,7 @@ def process_mpesa_callback(db: Session, provider: PaymentProvider, payload: Any)
     try:
         callback = parse_stk_callback(payload)
     except PaymentProviderError:
-        _record(db, provider, "callback", "malformed", {"note": "unparseable payload"})
+        record_event(db, provider, "callback", "malformed", {"note": "unparseable payload"})
         return "malformed"
 
     payment_id = db.scalar(
@@ -67,7 +108,7 @@ def process_mpesa_callback(db: Session, provider: PaymentProvider, payload: Any)
         )
     )
     if payment_id is None:
-        _record(db, provider, "callback", "unknown_payment", payload)
+        record_event(db, provider, "callback", "unknown_payment", payload)
         return "unknown_payment"
 
     # Same lock order as publishing and refunds: employer first, then the payment.
@@ -81,7 +122,7 @@ def process_mpesa_callback(db: Session, provider: PaymentProvider, payload: Any)
     )
 
     def finish(outcome: str) -> str:
-        _record(db, provider, "callback", outcome, payload, payment_id)
+        record_event(db, provider, "callback", outcome, payload, payment_id)
         return outcome
 
     if payment.status == "succeeded":
@@ -113,7 +154,7 @@ def process_mpesa_callback(db: Session, provider: PaymentProvider, payload: Any)
     except PaymentProviderError:
         return finish("verification_unavailable")
 
-    _record(
+    record_event(
         db,
         provider,
         "status_query",
@@ -132,28 +173,7 @@ def process_mpesa_callback(db: Session, provider: PaymentProvider, payload: Any)
     ):
         return finish("verification_failed")
 
-    if not payment.credits_to_grant:
-        return finish("needs_review")
-
-    entry_type = (
-        "initial_grant" if payment.purpose == "initial_employer_package" else "additional_purchase"
-    )
-    try:
-        with db.begin_nested():
-            payment.status = "succeeded"
-            payment.verified_at = now
-            payment.callback_received_at = now
-            payment.mpesa_receipt_number = callback.receipt
-            db.add(
-                EmployerPostingCreditEntry(
-                    employer_profile_id=payment.employer_profile_id,
-                    entry_type=entry_type,
-                    credit_delta=payment.credits_to_grant,
-                    payment_id=payment.id,
-                )
-            )
-            db.flush()
-    except IntegrityError:
+    if not grant_verified_payment(db, payment, callback.receipt, now, callback_received_at=now):
         return finish("needs_review")
 
     return finish("granted")
