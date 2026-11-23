@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     login_rate_limit_window_minutes: int = Field(default=15, ge=1)
 
     payment_provider: str = "fake"
+    payment_callback_secret: SecretStr | None = None
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",

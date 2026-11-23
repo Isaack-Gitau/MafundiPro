@@ -7,6 +7,7 @@ from app.models.job_advertisement import (
     JobAdvertisementAudit,
     JobAdvertisementContactMethod,
     Payment,
+    PaymentEvent,
     PaymentRefund,
 )
 from app.models.location import Location
@@ -25,6 +26,7 @@ __all__ = [
     "Location",
     "LoginRateLimit",
     "Payment",
+    "PaymentEvent",
     "PaymentRefund",
     "PhoneVerification",
     "Skill",
