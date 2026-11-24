@@ -41,9 +41,13 @@ def test_database() -> Generator[sessionmaker]:
     try:
         yield factory
     finally:
-        outer_transaction.rollback()
-        connection.close()
-        engine.dispose()
+        try:
+            outer_transaction.rollback()
+        finally:
+            try:
+                connection.close()
+            finally:
+                engine.dispose()
 
 
 @pytest.fixture
