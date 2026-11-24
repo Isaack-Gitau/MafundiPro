@@ -2,6 +2,7 @@ from app.models.employer import EmployerProfile
 from app.models.identity import PhoneVerification, User, UserRole, UserSession
 from app.models.job_advertisement import (
     EmployerPostingCreditEntry,
+    JobAdSettingChange,
     JobAdSettings,
     JobAdvertisement,
     JobAdvertisementAudit,
@@ -26,6 +27,7 @@ __all__ = [
     "Location",
     "LoginRateLimit",
     "Payment",
+    "JobAdSettingChange",
     "PaymentEvent",
     "PaymentRefund",
     "PhoneVerification",

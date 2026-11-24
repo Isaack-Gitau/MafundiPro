@@ -4,13 +4,12 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import delete
-from sqlalchemy.orm import Session
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.dependencies.database import get_db
-from app.database.session import SessionLocal
+from app.core.config import settings
 from app.main import app
-from app.models.taxonomy import Category, Skill, category_skills
 from app.services.taxonomy import (
     associate_skill,
     create_category,
@@ -23,22 +22,44 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture
-def db_session() -> Generator[Session]:
-    session = SessionLocal()
+def test_database() -> Generator[sessionmaker]:
+    """Provide a rollback-isolated connection to the PostgreSQL test database."""
+    engine = create_engine(
+        settings.database_url.set(database="mafundipro_test"),
+        pool_pre_ping=True,
+    )
+    connection = engine.connect()
+    outer_transaction = connection.begin()
+
+    factory = sessionmaker(
+        bind=connection,
+        autoflush=False,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
 
     try:
-        yield session
+        yield factory
     finally:
-        session.rollback()
-        session.close()
+        outer_transaction.rollback()
+        connection.close()
+        engine.dispose()
+
+
+@pytest.fixture
+def db_session(test_database: sessionmaker) -> Generator[Session]:
+    """Provide a session for preparing test data."""
+    with test_database() as session:
+        yield session
 
 
 @pytest_asyncio.fixture
-async def client() -> AsyncIterator[AsyncClient]:
+async def client(test_database: sessionmaker) -> AsyncIterator[AsyncClient]:
+    """Provide an HTTP client using the isolated PostgreSQL test database."""
     previous_overrides = app.dependency_overrides.copy()
 
     def override_get_db() -> Generator[Session]:
-        with SessionLocal() as session:
+        with test_database() as session:
             yield session
 
     app.dependency_overrides[get_db] = override_get_db
@@ -115,93 +136,43 @@ async def test_public_category_tree_filters_inactive_records(
 
     db_session.commit()
 
-    category_ids = [
-        construction.id,
-        roofing.id,
-        maintenance.id,
-        empty_category.id,
-        hidden_parent.id,
-        hidden_child.id,
-        hidden_grandchild.id,
-    ]
-    skill_ids = [shared_skill.id, inactive_skill.id]
+    response = await client.get("/api/v1/public/categories")
 
-    try:
-        response = await client.get("/api/v1/public/categories")
+    assert response.status_code == 200
 
-        assert response.status_code == 200
+    categories = response.json()
+    returned_names = {category["name"] for category in categories}
 
-        categories = response.json()
-        returned_names = {category["name"] for category in categories}
+    assert returned_names == {
+        construction.name,
+        maintenance.name,
+        empty_category.name,
+    }
 
-        assert returned_names == {
-            construction.name,
-            maintenance.name,
-            empty_category.name,
-        }
+    construction_result = next(item for item in categories if item["id"] == str(construction.id))
 
-        construction_result = next(
-            item for item in categories if item["id"] == str(construction.id)
-        )
+    assert [child["name"] for child in construction_result["children"]] == [roofing.name]
 
-        assert [child["name"] for child in construction_result["children"]] == [roofing.name]
+    assert [skill["name"] for skill in construction_result["skills"]] == [shared_skill.name]
 
-        assert [skill["name"] for skill in construction_result["skills"]] == [shared_skill.name]
+    maintenance_result = next(item for item in categories if item["id"] == str(maintenance.id))
 
-        maintenance_result = next(item for item in categories if item["id"] == str(maintenance.id))
+    assert [skill["name"] for skill in maintenance_result["skills"]] == [shared_skill.name]
 
-        assert [skill["name"] for skill in maintenance_result["skills"]] == [shared_skill.name]
+    empty_result = next(item for item in categories if item["id"] == str(empty_category.id))
+    assert empty_result["skills"] == []
+    assert empty_result["children"] == []
 
-        empty_result = next(item for item in categories if item["id"] == str(empty_category.id))
-        assert empty_result["skills"] == []
-        assert empty_result["children"] == []
+    all_returned_ids = {category["id"] for category in categories}
 
-        all_returned_ids = {category["id"] for category in categories}
+    all_returned_ids.update(
+        child["id"] for category in categories for child in category["children"]
+    )
 
-        all_returned_ids.update(
-            child["id"] for category in categories for child in category["children"]
-        )
+    assert str(hidden_parent.id) not in all_returned_ids
+    assert str(hidden_child.id) not in all_returned_ids
+    assert str(hidden_grandchild.id) not in all_returned_ids
 
-        assert str(hidden_parent.id) not in all_returned_ids
-        assert str(hidden_child.id) not in all_returned_ids
-        assert str(hidden_grandchild.id) not in all_returned_ids
+    returned_skill_ids = {skill["id"] for category in categories for skill in category["skills"]}
 
-        returned_skill_ids = {
-            skill["id"] for category in categories for skill in category["skills"]
-        }
-
-        assert str(inactive_skill.id) not in returned_skill_ids
-
-    finally:
-        db_session.execute(
-            delete(category_skills).where(category_skills.c.category_id.in_(category_ids))
-        )
-
-        db_session.execute(
-            delete(Category).where(
-                Category.id.in_(
-                    [
-                        hidden_grandchild.id,
-                        roofing.id,
-                        hidden_child.id,
-                    ]
-                )
-            )
-        )
-
-        db_session.execute(
-            delete(Category).where(
-                Category.id.in_(
-                    [
-                        construction.id,
-                        maintenance.id,
-                        empty_category.id,
-                        hidden_parent.id,
-                    ]
-                )
-            )
-        )
-
-        db_session.execute(delete(Skill).where(Skill.id.in_(skill_ids)))
-
-        db_session.commit()
+    assert str(inactive_skill.id) not in returned_skill_ids

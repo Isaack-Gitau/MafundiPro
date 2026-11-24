@@ -852,3 +852,45 @@ class PaymentEvent(Base):
         nullable=False,
         server_default=func.now(),
     )
+
+
+class JobAdSettingChange(Base):
+    """Append-only history of administrator changes to job advertisement prices."""
+
+    __tablename__ = "job_ad_setting_changes"
+    __table_args__ = (
+        CheckConstraint(
+            "setting_name IN ('initial_package_price', 'initial_package_credits', "
+            "'additional_credit_price')",
+            name="ck_job_ad_setting_changes_name",
+        ),
+        CheckConstraint(
+            "source IN ('cli', 'admin')",
+            name="ck_job_ad_setting_changes_source",
+        ),
+        CheckConstraint(
+            "source != 'admin' OR changed_by_user_id IS NOT NULL",
+            name="ck_job_ad_setting_changes_admin_actor",
+        ),
+        Index("ix_job_ad_setting_changes_created", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    setting_name: Mapped[str] = mapped_column(String(40), nullable=False)
+    old_value: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    new_value: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    changed_by_user_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    source: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )

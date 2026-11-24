@@ -62,3 +62,8 @@ temp/
 
 # Generated migration previews
 backend/identity_migration_preview.sql
+
+# Private local administration and audit artifacts
+/admin/
+/backend/audit_inventory.py
+/backend/audit_report.txt
